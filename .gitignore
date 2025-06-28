@@ -1,2 +1,4 @@
 .env
 analyzing_outputs/
+images/
+*.json
