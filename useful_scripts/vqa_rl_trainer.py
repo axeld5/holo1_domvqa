@@ -1,4 +1,4 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForImageTextToText
 import json
 from datasets import Dataset
 from trl import GRPOConfig, GRPOTrainer
@@ -52,7 +52,7 @@ def train_vqa_rl_model(
     max_seq_length = 33768  # Increased for longer DOM contexts
     
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model = AutoModelForImageTextToText.from_pretrained(model_name)
     
     # Add padding token if not present
     if tokenizer.pad_token is None:
