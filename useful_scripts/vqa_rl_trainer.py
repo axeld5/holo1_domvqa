@@ -130,7 +130,7 @@ def train_vqa_rl_model(
         max_grad_norm=1.0,
         report_to="none",
         output_dir="outputs",
-        remove_unused_columns=True,
+        remove_unused_columns=False,
         deepspeed="useful_scripts/ds_z3.json",
         gradient_checkpointing=False,
     )
@@ -147,7 +147,6 @@ def train_vqa_rl_model(
         reward_funcs=[reward_func],
         args=training_args,
         train_dataset=dataset,
-    data_collator=collator_with_ref,
     )
 
     print(f"[INFO] Starting VQA RL training for {max_steps} steps")
