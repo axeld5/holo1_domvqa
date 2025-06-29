@@ -98,8 +98,8 @@ def train_vqa_rl_model(
     # 2. GRPO training configuration -----------------------------------
     # ------------------------------------------------------------------
     # Large context window for DOM + question
-    max_prompt_length = 32_768
-    max_seq_length = 33_768
+    max_prompt_length = 16_384
+    max_seq_length = 16_484
 
     training_args = GRPOConfig(
         learning_rate=5e-5,  # Slightly higher LR for LoRA adapters
