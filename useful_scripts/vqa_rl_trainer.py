@@ -7,6 +7,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForImageTextToText,
     AutoTokenizer,
+    default_data_collator,
 )
 from trl import GRPOConfig, GRPOTrainer
 from rl_rewards import compute_vqa_rewards
@@ -14,6 +15,12 @@ from rl_rewards import compute_vqa_rewards
 # NEW: LoRA / PEFT imports
 from peft import LoraConfig, get_peft_model, PeftModel
 
+def collator_with_ref(features):
+    batch = default_data_collator([{k: v for k, v in f.items() if k != "answer"}
+                                   for f in features])
+    # keep the references as a plain python list
+    batch["answer"] = [f["answer"] for f in features]
+    return batch
 
 def train_vqa_rl_model(
     model_name: str = "HCompany/Holo1-3B",
@@ -48,15 +55,17 @@ def train_vqa_rl_model(
     for example in data:
         if example.get("split") != "train":
             continue
-        for turn in example.get("conversations", []):
-            if turn.get("role") == "user":
-                train_rows.append(
-                    {
-                        "question": turn["content"].strip(),
-                        "prompt": example["conversations"],
-                    }
-                )
-                break
+
+        # ── extract the first user turn and the first assistant turn ─────────
+        user_turn      = next(t for t in example["conversations"] if t["role"] == "user")
+        assistant_turn = next(t for t in example["conversations"] if t["role"] == "assistant")
+
+        train_rows.append(
+            {
+                "prompt":  user_turn["content"].strip(),      # what the model sees
+                "answer":  assistant_turn["content"].strip(), # ground-truth reference
+            }
+        )
     dataset = Dataset.from_list(train_rows)
     print(f"[INFO] Prepared {len(dataset):,} training examples")
 
@@ -138,6 +147,7 @@ def train_vqa_rl_model(
         reward_funcs=[reward_func],
         args=training_args,
         train_dataset=dataset,
+    data_collator=collator_with_ref,
     )
 
     print(f"[INFO] Starting VQA RL training for {max_steps} steps")

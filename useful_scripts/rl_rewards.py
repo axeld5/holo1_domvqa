@@ -44,25 +44,19 @@ def compute_vqa_rewards(prompts, completions, **kwargs):
     Returns:
         List[float]: Reward scores for each completion
     """
-    scores = []
+    refs = kwargs["answer"]          # list[str] – one per sample
+    rewards = []
+
+    for ref, completion in zip(refs, completions):
+        # completion is a list of messages; the model answer is the first one
+        model_text = completion[0]["content"].strip()
+
+        # enforce the \boxed{} rule
+        if reward_boxed_answer(model_text) == -1:
+            rewards.append(-1.0)
+            continue
+
+        sim = reward_answer_similarity(ref, model_text)
+        rewards.append(sim)
     
-    for i, completion_batch in enumerate(completions):
-        # Extract the source answer from the prompt
-        print(prompts)
-        print(prompts[i])
-        answer = prompts[i][1]["content"]
-        source_text = answer
-        
-        # Extract the model's answer from completion
-        target_text = completion_batch[0]["content"].strip()
-        
-        # Compute reward
-        boxed_reward = reward_boxed_answer(target_text)
-        if boxed_reward == -1:
-            reward = -1.0
-        else:
-            reward = reward_answer_similarity(source_text, target_text)
-        
-        scores.append(reward)
-    
-    return scores
+    return rewards
