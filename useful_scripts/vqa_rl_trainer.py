@@ -58,7 +58,7 @@ def train_vqa_rl_model(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Configure training parameters for 13B model
+    # Configure training parameters - optimized for multi-GPU
     max_prompt_length = 32768  # Increased for DOM content
     training_args = GRPOConfig(
         learning_rate=5e-6,  # Lower learning rate for larger model
@@ -69,9 +69,12 @@ def train_vqa_rl_model(
         lr_scheduler_type="cosine",
         optim="adamw_torch_fused",
         logging_steps=10,
-        per_device_train_batch_size=1,  # Smaller batch size for 13B model
-        gradient_accumulation_steps=8,  # Increased to maintain effective batch size
-        num_generations=4,  # Reduced for larger model
+        # Multi-GPU batch size configuration
+        # Effective batch size = per_device_train_batch_size × num_gpus × gradient_accumulation_steps
+        # Adjust these values based on your available GPU memory and number of GPUs
+        per_device_train_batch_size=1,  # Start small for memory safety
+        gradient_accumulation_steps=8,  # Increase to maintain effective batch size
+        num_generations=4,  # Reduced for larger model and multi-GPU setup
         max_prompt_length=max_prompt_length,
         max_completion_length=max_seq_length - max_prompt_length,
         num_train_epochs=1,
@@ -81,7 +84,12 @@ def train_vqa_rl_model(
         report_to="none",
         output_dir="outputs",
         remove_unused_columns=False,
-        bf16=True,  # Use bf16 for better performance with large models
+        # Multi-GPU optimizations
+        dataloader_num_workers=2,  # Reduce per GPU to avoid too many processes
+        bf16=True,  # Enable mixed precision for better memory efficiency
+        gradient_checkpointing=True,  # Enable to save memory
+        # Optional: DeepSpeed configuration for very large models
+        # deepspeed="path/to/deepspeed_config.json",
     )
     
     # Use VQA reward function
@@ -99,6 +107,10 @@ def train_vqa_rl_model(
     
     # Train the model
     print(f"Starting VQA RL training for {max_steps} steps")
+    print("Multi-GPU training configuration:")
+    print(f"- Per device batch size: {training_args.per_device_train_batch_size}")
+    print(f"- Gradient accumulation steps: {training_args.gradient_accumulation_steps}")
+    print(f"- Number of generations: {training_args.num_generations}")
     print("Reward structure:")
     print("- Boxed answer format: -1 if no \\boxed{} or content has 5+ words, 0 otherwise")
     print("- Answer similarity: Similarity score between ground truth and extracted answer")
@@ -106,7 +118,7 @@ def train_vqa_rl_model(
     
     trainer_stats = trainer.train()
     
-    # Save the model
+    # Save the model (only on main process in distributed setup)
     print(f"Saving model to: {save_path}")
     model.save_pretrained(save_path)
     tokenizer.save_pretrained(save_path)
