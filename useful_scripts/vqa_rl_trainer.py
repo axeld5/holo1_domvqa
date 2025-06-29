@@ -37,12 +37,12 @@ def train_vqa_rl_model(
     # Prepare dataset for GRPO training
     rows = []
     for example in data:
-        # Get the user question from conversations
-        for turn in example["conversations"]:
-            if turn["role"] == "user":
-                question = turn["content"].strip()
-                rows.append({"question": question, "prompt": example["conversations"]})
-                break
+        if example["split"] == "train":
+            for turn in example["conversations"]:
+                if turn["role"] == "user":
+                    question = turn["content"].strip()
+                    rows.append({"question": question, "prompt": example["conversations"]})
+                    break
 
     dataset = Dataset.from_list(rows)
     print(f"Prepared {len(rows)} training examples")
