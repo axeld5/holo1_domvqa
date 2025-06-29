@@ -48,6 +48,8 @@ def compute_vqa_rewards(prompts, completions, **kwargs):
     
     for i, completion_batch in enumerate(completions):
         # Extract the source answer from the prompt
+        print(prompts)
+        print(prompts[i])
         answer = prompts[i][1]["content"]
         source_text = answer
         
