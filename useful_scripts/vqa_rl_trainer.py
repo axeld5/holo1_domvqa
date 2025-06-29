@@ -87,10 +87,13 @@ def train_vqa_rl_model(
         # Multi-GPU optimizations
         dataloader_num_workers=2,  # Reduce per GPU to avoid too many processes
         bf16=True,  # Enable mixed precision for better memory efficiency
-        gradient_checkpointing=True,  # Enable to save memory
-        # Optional: DeepSpeed configuration for very large models
-        # deepspeed="path/to/deepspeed_config.json",
-        fsdp="full_shard"
+        fsdp="full_shard",
+        fsdp_config={
+            "flatten_parameters": False,      # ← keeps Embedding weight 2-D
+            "activation_checkpointing": True, # replaces gradient_checkpointing
+            "transformer_layer_cls_to_wrap": "Qwen2_5_VLDecoderLayer",  # auto-wrap only real blocks
+        },
+        gradient_checkpointing=False, 
     )
     
     # Use VQA reward function
