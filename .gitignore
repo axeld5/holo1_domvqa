@@ -1,4 +1,5 @@
 .env
 analyzing_outputs/
 images/
+otherset/
 *.json
