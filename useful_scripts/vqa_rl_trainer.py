@@ -90,6 +90,7 @@ def train_vqa_rl_model(
         gradient_checkpointing=True,  # Enable to save memory
         # Optional: DeepSpeed configuration for very large models
         # deepspeed="path/to/deepspeed_config.json",
+        fsdp="full_shard"
     )
     
     # Use VQA reward function
