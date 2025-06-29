@@ -17,7 +17,7 @@ def get_dom_messages(question, dom):
 
 def prepare_vqa_dataset(output_file="vqa_rl_data.json"):
     """
-    Prepare the Tatoeba dataset for RL training.
+    Prepare the VQA dataset for RL training.
     
     Args:
         num_samples (int): Number of samples to extract
@@ -47,19 +47,37 @@ def prepare_vqa_dataset(output_file="vqa_rl_data.json"):
         }        
         rl_data.append(conversation)
     
+    # Shuffle and split into train/eval
+    random.seed(42)
+    random.shuffle(rl_data)
+    n_total = len(rl_data)
+    n_eval = n_total // 5
+    eval_data = rl_data[:n_eval]
+    train_data = rl_data[n_eval:]
+
+    # Add split label
+    for ex in train_data:
+        ex["split"] = "train"
+    for ex in eval_data:
+        ex["split"] = "eval"
+
+    final_data = train_data + eval_data
+
     # Save the dataset
     os.makedirs(os.path.dirname(output_file) if os.path.dirname(output_file) else ".", exist_ok=True)
     
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(rl_data, f, indent=2, ensure_ascii=False)
+        json.dump(final_data, f, indent=2, ensure_ascii=False)
     
     print(f"Dataset saved to {output_file}")
-    print(f"Number of samples: {len(rl_data)}")
+    print(f"Number of samples: {len(final_data)}")
+    print(f"Train: {len(train_data)}, Eval: {len(eval_data)}")
     
     # Show some examples
     print("\nFirst 3 examples:")
-    for i, example in enumerate(rl_data[:3]):
+    for i, example in enumerate(final_data[:3]):
         print(f"Example {i+1}:")
+        print(f"Split: {example['split']}")
         print(f"Question: {example['conversations'][0]['content']}")
         print(f"Answer: {example['conversations'][1]['content']}")
         print()
