@@ -87,13 +87,8 @@ def train_vqa_rl_model(
         # Multi-GPU optimizations
         dataloader_num_workers=2,  # Reduce per GPU to avoid too many processes
         bf16=True,  # Enable mixed precision for better memory efficiency
-        fsdp="full_shard",
-        fsdp_config={
-            "flatten_parameters": False,      # ← keeps Embedding weight 2-D
-            "activation_checkpointing": True, # replaces gradient_checkpointing
-            "transformer_layer_cls_to_wrap": "Qwen2_5_VLDecoderLayer",  # auto-wrap only real blocks
-        },
-        gradient_checkpointing=False, 
+        deepspeed="useful_scripts/ds_z3.json",
+        gradient_checkpointing=True   # fine here; ZeRO doesn’t flatten anything
     )
     
     # Use VQA reward function
