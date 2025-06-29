@@ -1,4 +1,4 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForImageTextToText, AutoProcessor
 import json
 import torch
 from tqdm import tqdm
@@ -7,13 +7,54 @@ import os
 from rl_rewards import compute_vqa_rewards, reward_boxed_answer, reward_answer_similarity
 import numpy as np
 import pandas as pd
+from PIL import Image
+
+def load_image(image_path, images_dir="labelling_difficulty/images"):
+    """
+    Load an image from the specified path.
+    
+    Args:
+        image_path (str): Path to the image file
+        images_dir (str): Directory containing images
+        
+    Returns:
+        PIL.Image: Loaded image or None if failed
+    """
+    try:
+        # Try different possible paths
+        possible_paths = [
+            image_path,
+            os.path.join(images_dir, image_path),
+            os.path.join(images_dir, os.path.basename(image_path))
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                return Image.open(path).convert('RGB')
+        
+        print(f"Warning: Could not find image at any of: {possible_paths}")
+        return None
+    except Exception as e:
+        print(f"Error loading image {image_path}: {e}")
+        return None
+
+def is_vision_model(model_path):
+    """Check if the model is a vision model based on its config or name."""
+    try:
+        # Check if it's a known vision model
+        vision_models = ["Holo1", "Qwen2.5-VL", "qwen2-vl", "holo1"]
+        model_name_lower = model_path.lower()
+        return any(vm.lower() in model_name_lower for vm in vision_models)
+    except:
+        return False
 
 def evaluate_single_model(
     model_path,
     eval_examples,
     model_name=None,
     temperature=0.1,
-    max_new_tokens=256
+    max_new_tokens=256,
+    images_dir="labelling_difficulty/images"
 ):
     """
     Evaluate a single model on the provided examples.
@@ -24,6 +65,7 @@ def evaluate_single_model(
         model_name (str): Display name for the model
         temperature (float): Temperature for generation
         max_new_tokens (int): Maximum tokens to generate
+        images_dir (str): Directory containing images
         
     Returns:
         dict: Evaluation results for this model
@@ -35,18 +77,31 @@ def evaluate_single_model(
     print(f"\nEvaluating model: {model_name}")
     print(f"Model path: {model_path}")
     
-    # Load the model
+    # Load the model - check if it's a vision model
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        model = AutoModelForCausalLM.from_pretrained(model_path)
+        if is_vision_model(model_path):
+            print(f"Loading as vision model...")
+            processor = AutoProcessor.from_pretrained(model_path)
+            model = AutoModelForImageTextToText.from_pretrained(
+                model_path,
+                torch_dtype="auto",
+                device_map="auto"
+            )
+            is_vision = True
+        else:
+            print(f"Loading as text model...")
+            tokenizer = AutoTokenizer.from_pretrained(model_path)
+            model = AutoModelForCausalLM.from_pretrained(model_path)
+            
+            # Add padding token if not present
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            # Move model to GPU if available
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model.to(device)
+            is_vision = False
         
-        # Add padding token if not present
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
-        # Move model to GPU if available
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model.to(device)
         model.eval()
         
     except Exception as e:
@@ -60,7 +115,7 @@ def evaluate_single_model(
     
     for i, example in enumerate(tqdm(eval_examples, desc=f"Evaluating {model_name}")):
         try:
-            # Get the user prompt and ground truth answer
+            # Get the question, image path, and ground truth answer
             conversations = example["conversations"]
             user_prompt = None
             ground_truth = None
@@ -74,23 +129,76 @@ def evaluate_single_model(
             if not user_prompt or not ground_truth:
                 continue
             
+            # Extract question and image path from the example
+            question = example.get("question", "")
+            image_path = example.get("image_path", example.get("image", ""))
+            
+            if not question:
+                # Try to extract question from user prompt
+                if "Question:" in user_prompt:
+                    question = user_prompt.split("Question:")[-1].split("Your answer")[0].strip()
+                else:
+                    question = "What do you see in this image?"
+            
             # Generate model response
-            messages = [{"role": "user", "content": user_prompt}]
-            input_text = tokenizer.apply_chat_template(messages, tokenize=False)
-            model_inputs = tokenizer([input_text], return_tensors="pt").to(device)
-            
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    **model_inputs,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temperature,
-                    do_sample=temperature > 0,
-                    pad_token_id=tokenizer.eos_token_id
+            if is_vision:
+                # Vision model inference
+                image = load_image(image_path, images_dir)
+                if image is None:
+                    print(f"Skipping example {i}: Could not load image {image_path}")
+                    continue
+                
+                # Create image-based prompt
+                messages = [{
+                    "role": "user", 
+                    "content": f"{question}\nYour answer must be a boolean, a word or a number, contained within $\\boxed{{}}$. Now answer the question."
+                }]
+                
+                # Preparation for inference
+                text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                inputs = processor(
+                    text=[text],
+                    images=[image],
+                    padding=True,
+                    return_tensors="pt",
                 )
-            
-            # Decode the response
-            output_ids = generated_ids[0][len(model_inputs.input_ids[0]):]
-            model_response = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+                inputs = inputs.to("cuda")
+                
+                with torch.no_grad():
+                    generated_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
+                    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)]
+                    responses = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+                    model_response = responses[0].strip()
+            else:
+                # Text model inference (fallback to DOM if available)
+                dom_content = example.get("cleaned_html", "")
+                if dom_content:
+                    prompt = f"""Given the following DOM of a page, answer the question that is asked.
+<dom>{dom_content}</dom>
+Question: {question}
+Your answer must be a boolean, a word or a number, contained within $\\boxed{{}}$. Now answer the question.
+Answer:"""
+                else:
+                    prompt = f"""Answer the following question:
+Question: {question}
+Your answer must be a boolean, a word or a number, contained within $\\boxed{{}}$. Now answer the question.
+Answer:"""
+                
+                messages = [{"role": "user", "content": prompt}]
+                input_text = tokenizer.apply_chat_template(messages, tokenize=False)
+                model_inputs = tokenizer([input_text], return_tensors="pt").to(device)
+                
+                with torch.no_grad():
+                    generated_ids = model.generate(
+                        **model_inputs,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        do_sample=temperature > 0,
+                        pad_token_id=tokenizer.eos_token_id
+                    )
+                
+                output_ids = generated_ids[0][len(model_inputs.input_ids[0]):]
+                model_response = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
             
             # Compute rewards
             boxed_reward = reward_boxed_answer(model_response)
@@ -110,7 +218,8 @@ def evaluate_single_model(
             # Store detailed result
             result = {
                 "example_id": i,
-                "user_prompt": user_prompt,
+                "question": question,
+                "image_path": image_path,
                 "ground_truth": ground_truth,
                 "model_response": model_response,
                 "boxed_reward": boxed_reward,
@@ -151,7 +260,8 @@ def evaluate_multiple_models(
     dataset_file="vqa_rl_data.json",
     max_examples=None,
     temperature=0.1,
-    max_new_tokens=256
+    max_new_tokens=256,
+    images_dir="labelling_difficulty/images"
 ):
     """
     Evaluate multiple models on the eval split of the dataset.
@@ -162,6 +272,7 @@ def evaluate_multiple_models(
         max_examples (int): Maximum number of examples to evaluate (None for all)
         temperature (float): Temperature for generation
         max_new_tokens (int): Maximum tokens to generate
+        images_dir (str): Directory containing images
         
     Returns:
         dict: Evaluation results for all models
@@ -204,7 +315,8 @@ def evaluate_multiple_models(
             eval_examples=eval_examples,
             model_name=model_name,
             temperature=temperature,
-            max_new_tokens=max_new_tokens
+            max_new_tokens=max_new_tokens,
+            images_dir=images_dir
         )
         
         if result:
@@ -261,6 +373,8 @@ def print_comparative_summary(all_results):
             # Show best example for this model
             best_example = max(results_list, key=lambda x: x["final_reward"])
             print(f"Best Example (Reward: {best_example['final_reward']:.4f}):")
+            print(f"  Question: {best_example['question']}")  
+            print(f"  Image: {best_example['image_path']}")
             print(f"  Ground Truth: {best_example['ground_truth']}")
             print(f"  Model Response: {best_example['model_response']}")
 
@@ -278,6 +392,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate multiple VQA models on the eval split")
     parser.add_argument("--dataset_file", type=str, default="vqa_rl_data.json",
                         help="Path to the VQA dataset file")
+    parser.add_argument("--images_dir", type=str, default="labelling_difficulty/images",
+                        help="Directory containing images")
     parser.add_argument("--max_examples", type=int, default=None,
                         help="Maximum number of examples to evaluate")
     parser.add_argument("--temperature", type=float, default=0.1,
@@ -298,7 +414,7 @@ if __name__ == "__main__":
             "name": "Qwen2.5-VL-3B-Instruct"
         },
         {
-            "path": "HCompany/Holo1-3B",
+            "path": "Hcompany/Holo1-3B",
             "name": "Holo1-3B"
         },
         {
@@ -317,7 +433,8 @@ if __name__ == "__main__":
         dataset_file=args.dataset_file,
         max_examples=args.max_examples,
         temperature=args.temperature,
-        max_new_tokens=args.max_new_tokens
+        max_new_tokens=args.max_new_tokens,
+        images_dir=args.images_dir
     )
     
     if all_results:
