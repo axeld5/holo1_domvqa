@@ -1,0 +1,11 @@
+peft
+bitsandbytes
+trl
+datasets
+torch
+transformers
+tiktoken
+deepspeed
+accelerate
+pandas
+numpy
