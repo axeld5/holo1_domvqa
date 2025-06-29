@@ -49,9 +49,7 @@ def compute_vqa_rewards(prompts, completions, **kwargs):
 
     for ref, completion in zip(refs, completions):
         # completion is a list of messages; the model answer is the first one
-        print(ref)
-        print(completion)
-        model_text = completion[0]["content"].strip()
+        model_text = completion.strip()
 
         # enforce the \boxed{} rule
         if reward_boxed_answer(model_text) == -1:
