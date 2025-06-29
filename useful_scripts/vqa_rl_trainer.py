@@ -76,8 +76,8 @@ def train_vqa_rl_model(
     # LoRA configuration (rank = r)
     print(f"[INFO] Initialising LoRA (r = {lora_r})")
     lora_config = LoraConfig(
-        r=lora_r,
-        lora_alpha=lora_r * 2,  # common heuristic
+        r=32,
+        lora_alpha=32 * 2,  # common heuristic
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
@@ -121,11 +121,9 @@ def train_vqa_rl_model(
         max_grad_norm=1.0,
         report_to="none",
         output_dir="outputs",
-        remove_unused_columns=False,
-        bf16=True,
-        # Deepspeed config is optional; comment out if not using it
-        # deepspeed="useful_scripts/ds_z3.json",
-        gradient_checkpointing=True,
+        remove_unused_columns=True,
+        deepspeed="useful_scripts/ds_z3.json",
+        gradient_checkpointing=False,
     )
 
     # ------------------------------------------------------------------
