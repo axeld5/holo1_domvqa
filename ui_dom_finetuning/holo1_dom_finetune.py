@@ -274,8 +274,9 @@ def load_holo1_model_optimized(use_deepspeed=True):
         # Prepare model for k-bit training (required for quantized models)
         model = prepare_model_for_kbit_training(model)
     
-    # Enable gradient checkpointing to save memory
-    model.gradient_checkpointing_enable()
+    # Enable gradient checkpointing to save memory (only for non-DeepSpeed training)
+    if not use_deepspeed:
+        model.gradient_checkpointing_enable()
     
     # Find target modules for LoRA
     target_modules = find_target_modules(model)
@@ -505,7 +506,7 @@ def evaluate_model_subset(model, processor, test_dataset, max_samples: int = 10)
 
 def setup_deepspeed_config():
     """Setup DeepSpeed configuration"""
-    config_path = "ds_z3.json"
+    config_path = "ui_dom_finetuning/ds_z3.json"
     
     # Check if config file exists
     if not os.path.exists(config_path):
@@ -578,11 +579,11 @@ def main():
         dataloader_pin_memory=False,
         dataloader_num_workers=0,
         bf16=True,  # Matches DeepSpeed config
-        gradient_checkpointing=True,
+        gradient_checkpointing=False,  # Aligned with RL trainer
         dataloader_drop_last=True,
         remove_unused_columns=False,
         report_to=None,  # Disable wandb/tensorboard
-        deepspeed="ds_z3.json" if use_deepspeed else None,  # DeepSpeed config
+        deepspeed="ui_dom_finetuning/ds_z3.json" if use_deepspeed else None,  # DeepSpeed config
         # Additional DeepSpeed-specific settings
         save_total_limit=2,
         prediction_loss_only=True,

@@ -13,3 +13,4 @@ pillow
 python-dotenv
 psutil
 huggingface_hub
+tf-keras
