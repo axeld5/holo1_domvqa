@@ -69,11 +69,11 @@ pipeline_tag: image-to-text
 
 # Holo1 UI2DOM - Screenshot to HTML Converter
 
-This model is a fine-tuned version of [HCompany/Holo1](https://huggingface.co/HCompany/Holo1) for converting UI screenshots to HTML code.
+This model is a fine-tuned version of [Hcompany/Holo1-3B](https://huggingface.co/Hcompany/Holo1-3B) for converting UI screenshots to HTML code.
 
 ## Model Description
 
-- **Base Model**: HCompany/Holo1
+- **Base Model**: Hcompany/Holo1-3B
 - **Fine-tuned on**: Web screenshots and corresponding HTML code
 - **Task**: Convert UI screenshots to HTML/CSS code
 - **Training**: Optimized with DeepSpeed ZeRO-3 for efficient large-scale training
@@ -154,7 +154,7 @@ The model demonstrates strong capability in:
 ```bibtex
 @misc{{holo1_ui2dom,
   title={{Holo1 UI2DOM: Screenshot to HTML Converter}},
-  author={{Fine-tuned from HCompany/Holo1}},
+  author={{Fine-tuned from Hcompany/Holo1-3B}},
   year={{2024}},
   url={{https://huggingface.co/{repo_name}}}
 }}
@@ -248,9 +248,9 @@ def setup_lora_config(target_modules=None):
 
 def load_holo1_model_optimized(use_deepspeed=True):
     """Load Holo1 model with memory optimizations and DeepSpeed compatibility"""
-    print("Loading HCompany/Holo1 with memory optimizations...")
+    print("Loading Hcompany/Holo1-3B with memory optimizations...")
     
-    model_id = "HCompany/Holo1"
+    model_id = "Hcompany/Holo1-3B"
     
     if use_deepspeed:
         # For DeepSpeed, we don't use quantization as it can conflict with Zero Stage 3
