@@ -590,7 +590,6 @@ def main():
         deepspeed="ui_dom_finetuning/ds_z3.json" if use_deepspeed else None,  # DeepSpeed config
         # Additional DeepSpeed-specific settings
         save_total_limit=2,
-        prediction_loss_only=True,
         # Hub settings
         hub_model_id=args.hub_repo if args.push_to_hub else None,
         push_to_hub=args.push_to_hub,
