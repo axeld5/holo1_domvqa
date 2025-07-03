@@ -450,7 +450,7 @@ def generate_response(model, processor, image: Image.Image, question: str) -> st
     with torch.no_grad():
         generated_ids = model.generate(
             **inputs,
-            max_new_tokens=2048,  # Increased for HTML generation
+            max_new_tokens=4096,  # Increased for HTML generation
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
@@ -579,9 +579,7 @@ def main():
         warmup_steps=50,
         logging_steps=10,
         save_steps=100,
-        evaluation_strategy="steps",
         eval_steps=100,
-        save_strategy="steps",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
@@ -589,7 +587,6 @@ def main():
         dataloader_num_workers=0,
         bf16=True,  # Matches DeepSpeed config
         gradient_checkpointing=False,  # Aligned with RL trainer
-        dataloader_drop_last=True,
         remove_unused_columns=False,
         report_to=None,  # Disable wandb/tensorboard
         deepspeed="ui_dom_finetuning/ds_z3.json" if use_deepspeed else None,  # DeepSpeed config
@@ -598,8 +595,6 @@ def main():
         prediction_loss_only=True,
         # Hub settings
         hub_model_id=args.hub_repo if args.push_to_hub else None,
-        hub_strategy="checkpoint" if args.push_to_hub else None,
-        hub_private_repo=args.private_repo,
         push_to_hub=args.push_to_hub,
     )
     
