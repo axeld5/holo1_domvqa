@@ -450,7 +450,7 @@ def generate_response(model, processor, image: Image.Image, question: str) -> st
     with torch.no_grad():
         generated_ids = model.generate(
             **inputs,
-            max_new_tokens=4096,  # Increased for HTML generation
+            max_new_tokens=2048,  # Increased for HTML generation
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
