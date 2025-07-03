@@ -300,9 +300,22 @@ def load_webcode2m_dataset(num_samples=1000):
     """Load and prepare the webcode2m_purified dataset"""
     print(f"Loading webcode2m_purified dataset with {num_samples} samples...")
     
-    # Use slicing to only download the required number of samples
-    # This is much faster than loading the entire dataset first
-    dataset = load_dataset("xcodemind/webcode2m_purified", split=f"train[:{num_samples}]")
+    # Use streaming mode to avoid downloading the entire dataset
+    # This loads data on-demand and is much faster
+    dataset_stream = load_dataset("xcodemind/webcode2m_purified", split="train", streaming=True)
+    
+    # Take only the required number of samples from the stream
+    dataset_list = []
+    for i, sample in enumerate(dataset_stream):
+        if i >= num_samples:
+            break
+        dataset_list.append(sample)
+        if (i + 1) % 100 == 0:  # Progress indicator
+            print(f"Loaded {i + 1}/{num_samples} samples...")
+    
+    # Convert list back to dataset format
+    from datasets import Dataset
+    dataset = Dataset.from_list(dataset_list)
     
     print(f"Dataset loaded with {len(dataset)} samples")
     return dataset
