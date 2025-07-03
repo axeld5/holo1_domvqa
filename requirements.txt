@@ -9,3 +9,7 @@ deepspeed
 accelerate
 pandas
 numpy
+pillow
+python-dotenv
+psutil
+huggingface_hub

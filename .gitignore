@@ -3,4 +3,5 @@ analyzing_outputs/
 images/
 otherset/
 *.json
+!ds_z3.json
 OLD/

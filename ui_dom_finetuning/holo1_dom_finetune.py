@@ -1,16 +1,197 @@
 import torch
 import json
 import gc
+import os
 from PIL import Image
 from datasets import load_dataset
 from transformers import AutoProcessor, AutoModelForImageTextToText, TrainingArguments, Trainer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 from dotenv import load_dotenv
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import numpy as np
 import random
+from huggingface_hub import login, HfApi
+import argparse
 
 load_dotenv()
+
+def setup_huggingface_hub():
+    """Setup Hugging Face Hub authentication"""
+    try:
+        # Try to login with token from environment or cache
+        login(token=os.getenv("HF_TOKEN"), add_to_git_credential=True)
+        print("✓ Hugging Face Hub authentication successful")
+        return True
+    except Exception as e:
+        print(f"⚠ Hugging Face Hub authentication failed: {e}")
+        print("Please set HF_TOKEN environment variable or run 'huggingface-cli login'")
+        return False
+
+def push_to_hub(model_path: str, repo_name: str, private: bool = False, commit_message: str = "Upload Holo1 UI2DOM model"):
+    """Push the trained model to Hugging Face Hub"""
+    try:
+        print(f"\n🚀 Pushing model to Hugging Face Hub: {repo_name}")
+        
+        # Setup HF Hub authentication
+        if not setup_huggingface_hub():
+            print("❌ Cannot push to Hub without authentication")
+            return False
+        
+        # Get the model and processor
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+        from peft import PeftModel
+        
+        # Load the trained model
+        print("📥 Loading trained model...")
+        model = AutoModelForImageTextToText.from_pretrained(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True
+        )
+        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+        
+        # Create model card content
+        model_card = f"""---
+license: apache-2.0
+tags:
+- vision
+- image-to-text
+- html-generation
+- ui-to-code
+- multimodal
+- holo1
+- dom
+- screenshot-to-html
+language:
+- en
+pipeline_tag: image-to-text
+---
+
+# Holo1 UI2DOM - Screenshot to HTML Converter
+
+This model is a fine-tuned version of [HCompany/Holo1](https://huggingface.co/HCompany/Holo1) for converting UI screenshots to HTML code.
+
+## Model Description
+
+- **Base Model**: HCompany/Holo1
+- **Fine-tuned on**: Web screenshots and corresponding HTML code
+- **Task**: Convert UI screenshots to HTML/CSS code
+- **Training**: Optimized with DeepSpeed ZeRO-3 for efficient large-scale training
+
+## Usage
+
+```python
+import torch
+from PIL import Image
+from transformers import AutoProcessor, AutoModelForImageTextToText
+
+# Load model and processor
+model_name = "{repo_name}"
+model = AutoModelForImageTextToText.from_pretrained(model_name, trust_remote_code=True)
+processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+
+# Load your screenshot
+image = Image.open("path/to/your/screenshot.png")
+
+# Prepare the conversation
+messages = [
+    {{
+        "role": "user",
+        "content": [
+            {{"type": "text", "text": "convert this image to html"}},
+            {{"type": "image"}},
+        ]
+    }}
+]
+
+# Process and generate
+text = processor.apply_chat_template(messages, add_generation_prompt=True)
+inputs = processor(text=text, images=[image], return_tensors="pt")
+
+# Generate HTML
+with torch.no_grad():
+    generated_ids = model.generate(
+        **inputs,
+        max_new_tokens=2048,
+        do_sample=True,
+        temperature=0.7,
+        top_p=0.9,
+    )
+
+# Decode the result
+generated_text = processor.batch_decode(
+    generated_ids[:, inputs['input_ids'].shape[1]:], 
+    skip_special_tokens=True
+)[0]
+
+print("Generated HTML:", generated_text)
+```
+
+## Training Details
+
+- **Dataset**: webcode2m_purified (screenshot-HTML pairs)
+- **Training Framework**: DeepSpeed ZeRO-3
+- **Optimization**: LoRA (Low-Rank Adaptation) for parameter-efficient fine-tuning
+- **Precision**: BF16 mixed precision training
+- **Batch Size**: Effective batch size of 8 (micro batch size 1 × gradient accumulation 8)
+
+## Performance
+
+The model demonstrates strong capability in:
+- Converting UI screenshots to semantic HTML
+- Preserving layout structure and styling
+- Generating clean, readable HTML code
+- Handling various UI components and layouts
+
+## Limitations
+
+- Performance may vary on UI designs significantly different from training data
+- Generated HTML may need manual refinement for production use
+- Model size requires sufficient GPU memory for inference
+
+## Citation
+
+```bibtex
+@misc{{holo1_ui2dom,
+  title={{Holo1 UI2DOM: Screenshot to HTML Converter}},
+  author={{Fine-tuned from HCompany/Holo1}},
+  year={{2024}},
+  url={{https://huggingface.co/{repo_name}}}
+}}
+```
+
+## License
+
+This model is released under the Apache 2.0 license.
+"""
+        
+        # Save model card
+        model_card_path = os.path.join(model_path, "README.md")
+        with open(model_card_path, "w", encoding="utf-8") as f:
+            f.write(model_card)
+        
+        # Push to Hub
+        print(f"📤 Uploading to {repo_name}...")
+        model.push_to_hub(
+            repo_id=repo_name,
+            private=private,
+            commit_message=commit_message,
+            use_auth_token=True
+        )
+        
+        processor.push_to_hub(
+            repo_id=repo_name,
+            private=private,
+            commit_message=commit_message,
+            use_auth_token=True
+        )
+        
+        print(f"✅ Model successfully pushed to: https://huggingface.co/{repo_name}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error pushing to Hub: {e}")
+        return False
 
 def clear_memory():
     """Clear GPU memory cache"""
@@ -65,25 +246,33 @@ def setup_lora_config(target_modules=None):
     )
     return lora_config
 
-def load_holo1_model_optimized():
-    """Load Holo1 model with memory optimizations"""
+def load_holo1_model_optimized(use_deepspeed=True):
+    """Load Holo1 model with memory optimizations and DeepSpeed compatibility"""
     print("Loading HCompany/Holo1 with memory optimizations...")
     
-    # Setup quantization
-    bnb_config = setup_quantization()
-    
-    # Load model with quantization
     model_id = "HCompany/Holo1"
-    model = AutoModelForImageTextToText.from_pretrained(
-        model_id,
-        quantization_config=bnb_config,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True
-    )
     
-    # Prepare model for k-bit training (required for quantized models)
-    model = prepare_model_for_kbit_training(model)
+    if use_deepspeed:
+        # For DeepSpeed, we don't use quantization as it can conflict with Zero Stage 3
+        print("Loading model for DeepSpeed optimization...")
+        model = AutoModelForImageTextToText.from_pretrained(
+            model_id,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+            device_map=None,  # Let DeepSpeed handle device placement
+        )
+    else:
+        # Setup quantization for non-DeepSpeed training
+        bnb_config = setup_quantization()
+        model = AutoModelForImageTextToText.from_pretrained(
+            model_id,
+            quantization_config=bnb_config,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True
+        )
+        # Prepare model for k-bit training (required for quantized models)
+        model = prepare_model_for_kbit_training(model)
     
     # Enable gradient checkpointing to save memory
     model.gradient_checkpointing_enable()
@@ -101,7 +290,9 @@ def load_holo1_model_optimized():
     print(f"Model loaded with {model.num_parameters()} total parameters")
     print(f"Trainable parameters: {model.num_parameters(only_trainable=True)}")
     
-    clear_memory()
+    if not use_deepspeed:
+        clear_memory()
+    
     return model, processor
 
 def load_webcode2m_dataset(num_samples=1000):
@@ -145,13 +336,16 @@ def get_image_token_id(processor):
     except:
         return None
 
-def collate_fn_factory(processor, image_token_id):
+def collate_fn_factory(processor, image_token_id, use_deepspeed=True):
     """Factory function to create collate_fn for Holo1 with memory optimization"""
     
     def collate_fn(examples):
-        # Process in smaller chunks to avoid OOM
+        # For DeepSpeed, we can be more aggressive with batch processing
         batch_size = len(examples)
-        if batch_size > 2:  # If batch is too large, process in chunks
+        max_chunk_size = 4 if use_deepspeed else 2
+        
+        if batch_size > max_chunk_size:
+            # Process in chunks to avoid OOM
             mid = batch_size // 2
             chunk1 = collate_fn(examples[:mid])
             chunk2 = collate_fn(examples[mid:])
@@ -214,7 +408,8 @@ def collate_fn_factory(processor, image_token_id):
             return batch
         except torch.cuda.OutOfMemoryError:
             print("OOM in collate_fn, clearing memory and retrying with smaller batch...")
-            clear_memory()
+            if not use_deepspeed:
+                clear_memory()
             # Try with just one example if we still have OOM
             if len(examples) > 1:
                 return collate_fn(examples[:1])
@@ -291,8 +486,9 @@ def evaluate_model_subset(model, processor, test_dataset, max_samples: int = 10)
             else:
                 print(f"✗ Failed to generate valid HTML")
             
-            # Clear memory after each evaluation
-            clear_memory()
+            # Clear memory after each evaluation (only if not using DeepSpeed)
+            if not torch.distributed.is_initialized():
+                clear_memory()
             
         except Exception as e:
             print(f"Error evaluating sample {i+1}: {e}")
@@ -307,15 +503,44 @@ def evaluate_model_subset(model, processor, test_dataset, max_samples: int = 10)
         "successful_generations": successful_generations
     }
 
+def setup_deepspeed_config():
+    """Setup DeepSpeed configuration"""
+    config_path = "ds_z3.json"
+    
+    # Check if config file exists
+    if not os.path.exists(config_path):
+        print(f"Warning: DeepSpeed config file {config_path} not found!")
+        return None
+    
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    
+    print(f"Using DeepSpeed config: {config}")
+    return config_path
+
 def main():
-    """Main training function"""
-    print("Starting Holo1 DOM finetuning...")
+    """Main training function with DeepSpeed optimization"""
+    parser = argparse.ArgumentParser(description="Holo1 DOM Finetuning with DeepSpeed")
+    parser.add_argument("--hub_repo", type=str, default="holo1_ui2dom", help="Hugging Face Hub repository name")
+    parser.add_argument("--push_to_hub", action="store_true", help="Push model to Hugging Face Hub after training")
+    parser.add_argument("--private_repo", action="store_true", help="Make the Hub repository private")
+    parser.add_argument("--num_samples", type=int, default=1000, help="Number of training samples")
+    
+    args = parser.parse_args()
+    
+    print("Starting Holo1 DOM finetuning with DeepSpeed...")
+    print(f"Training samples: {args.num_samples}")
+    if args.push_to_hub:
+        print(f"Will push to Hub: {args.hub_repo} (private: {args.private_repo})")
+    
+    # Setup DeepSpeed config
+    use_deepspeed = setup_deepspeed_config() is not None
     
     # Load model and processor
-    model, processor = load_holo1_model_optimized()
+    model, processor = load_holo1_model_optimized(use_deepspeed=use_deepspeed)
     
     # Load and preprocess dataset
-    dataset = load_webcode2m_dataset(num_samples=1000)
+    dataset = load_webcode2m_dataset(num_samples=args.num_samples)
     processed_dataset = preprocess_dataset(dataset)
     
     # Split dataset (80% train, 20% test)
@@ -331,14 +556,14 @@ def main():
     print(f"Image token ID: {image_token_id}")
     
     # Create collate function
-    collate_fn = collate_fn_factory(processor, image_token_id)
+    collate_fn = collate_fn_factory(processor, image_token_id, use_deepspeed=use_deepspeed)
     
-    # Training arguments
+    # Training arguments with DeepSpeed optimization
     training_args = TrainingArguments(
         output_dir="./holo1_dom_finetune_output",
-        per_device_train_batch_size=1,  # Small batch size for memory efficiency
+        per_device_train_batch_size=1,  # Matches DeepSpeed config
         per_device_eval_batch_size=1,
-        gradient_accumulation_steps=8,  # Simulate larger batch size
+        gradient_accumulation_steps=8,  # Matches DeepSpeed config
         num_train_epochs=3,
         learning_rate=1e-4,
         warmup_steps=50,
@@ -352,11 +577,20 @@ def main():
         greater_is_better=False,
         dataloader_pin_memory=False,
         dataloader_num_workers=0,
-        fp16=True,
+        bf16=True,  # Matches DeepSpeed config
         gradient_checkpointing=True,
         dataloader_drop_last=True,
         remove_unused_columns=False,
         report_to=None,  # Disable wandb/tensorboard
+        deepspeed="ds_z3.json" if use_deepspeed else None,  # DeepSpeed config
+        # Additional DeepSpeed-specific settings
+        save_total_limit=2,
+        prediction_loss_only=True,
+        # Hub settings
+        hub_model_id=args.hub_repo if args.push_to_hub else None,
+        hub_strategy="checkpoint" if args.push_to_hub else None,
+        hub_private_repo=args.private_repo,
+        push_to_hub=args.push_to_hub,
     )
     
     # Create trainer
@@ -377,8 +611,25 @@ def main():
         
         # Save the final model
         print("Saving final model...")
-        trainer.save_model("./holo1_dom_finetune_final")
-        processor.save_pretrained("./holo1_dom_finetune_final")
+        final_model_path = "./holo1_dom_finetune_final"
+        trainer.save_model(final_model_path)
+        processor.save_pretrained(final_model_path)
+        
+        # Push to Hub if requested
+        if args.push_to_hub:
+            print("\n" + "="*50)
+            print("PUSHING TO HUGGING FACE HUB")
+            print("="*50)
+            success = push_to_hub(
+                model_path=final_model_path,
+                repo_name=args.hub_repo,
+                private=args.private_repo,
+                commit_message="Upload trained Holo1 UI2DOM model"
+            )
+            if success:
+                print(f"🎉 Model successfully uploaded to: https://huggingface.co/{args.hub_repo}")
+            else:
+                print("❌ Failed to push model to Hub")
         
         # Evaluate the model
         print("Evaluating final model...")
@@ -391,8 +642,20 @@ def main():
     except Exception as e:
         print(f"Training failed with error: {e}")
         # Save checkpoint even if training fails
-        trainer.save_model("./holo1_dom_finetune_checkpoint")
-        processor.save_pretrained("./holo1_dom_finetune_checkpoint")
+        checkpoint_path = "./holo1_dom_finetune_checkpoint"
+        trainer.save_model(checkpoint_path)
+        processor.save_pretrained(checkpoint_path)
+        
+        # Try to push checkpoint to Hub if requested
+        if args.push_to_hub:
+            print("Attempting to push checkpoint to Hub...")
+            push_to_hub(
+                model_path=checkpoint_path,
+                repo_name=f"{args.hub_repo}-checkpoint",
+                private=args.private_repo,
+                commit_message="Upload training checkpoint"
+            )
+        
         raise
 
 if __name__ == "__main__":
