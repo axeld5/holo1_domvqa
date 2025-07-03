@@ -24,7 +24,7 @@ def prepare_vqa_dataset(output_file="vqa_rl_data.json"):
         output_file (str): Output file path
     """
     print("Loading VQA dataset...")
-    with open("json_to_dataset/domvqa_fused_filtered.json", "r", encoding="utf-8") as f:
+    with open("json_to_dataset/domvqa_fused_full_filtered.json", "r", encoding="utf-8") as f:
         dataset = json.load(f)
     
     # Prepare data in the format expected by the RL trainer
